@@ -1,14 +1,8 @@
 {
     "routes": [
         {
-            "upstream_path": "/salih",
-            "downstream_path": "/hello/salih",
-            "downstream_method": "GET",
-            "downstream_uri": "localhost:7979"
-        },
-        {
-            "upstream_path": "/zeynep",
-            "downstream_path": "/hello/zeynep",
+            "upstream_path": "/:name",
+            "downstream_path": "/hello/:name",
             "downstream_method": "GET",
             "downstream_uri": "localhost:7979"
         }

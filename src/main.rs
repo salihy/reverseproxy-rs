@@ -5,7 +5,11 @@ use std::io::prelude::*;
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::fs;
+use route_recognizer::{Router, Params};
+
 use lazy_static::lazy_static;
+
+use crate::route::Route;
 
 
 lazy_static! {
@@ -15,26 +19,28 @@ lazy_static! {
 
 fn main() {
 
+    let mut router: Router<Route> = Router::new();
+
+    for route in &ROUTES_CFG.routes {
+        router.add(&route.upstream_path, route.clone());
+    }
+
     let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
     let pool = ThreadPool::new(12);
 
     for stream in listener.incoming() {
         let stream = stream.unwrap();
-
+        let r = router.clone();
 
         pool.execute(|| {
-            handle_connection(stream);
+            handle_connection(stream, r);
         });
     }
 
     println!("Shutting down.");
 }
 
-fn get_routes() -> route::Routes {
-    ROUTES_CFG.clone()
-}
-
-fn handle_connection(mut stream: TcpStream) {
+fn handle_connection(mut stream: TcpStream, router: Router<Route>) {
     let mut buffer = vec![0; 4096];
     stream.read(&mut buffer).unwrap();
 
@@ -45,64 +51,58 @@ fn handle_connection(mut stream: TcpStream) {
     println!("Req:\n{}", &req_str);
 
     let method_line: &str = req_str.lines().next().unwrap();
-    println!("method_line: {}", method_line);
-    let method_lines: Vec<&str> = req_str.lines().filter(|&x| x.starts_with("GET")).collect();
-
-    //todo: GET harici metodlar icin patlar burasi
-    if method_lines.len() != 1 {
-        println!("no method lines found!");
-        return;
-    }
-
-    let method_line = method_lines[0];
-
     let first_line_tokens: Vec<&str> = method_line.split(' ').collect();
 
-    let mut get_routes: Vec<route::Route> = get_routes()
-                                            .routes
-                                            .into_iter()
-                                            .filter(|x| x.downstream_method == first_line_tokens[0])
-                                            .collect::<Vec<route::Route>>();
-    get_routes = get_routes.into_iter().filter(|x| first_line_tokens[1] == &x.upstream_path).collect();
-    
-    if get_routes.len() != 1 {
-        println!("no routes found!");
-        return;
-    }
+    match router.recognize(first_line_tokens[1]) {
+        Ok(m) => {
+            for line in req_str.lines() {
+                if line == method_line {
+                    
+                    let mut ds_path: String = m.handler().downstream_path.to_string();
 
-    let get_route: &route::Route = &get_routes[0];
+                    for param in m.params().iter() {
+                        ds_path = ds_path.replace(&format!(":{}", param.0), param.1);
+                        println!("{}", param.0);
+                        println!("{}", param.1);
+                    }
 
-    println!("Route: {:?}", &get_route);
-
-    for line in req_str.lines() {
-        if line == method_line {
-            downstream_req_str = format!("{}\n{} {} {}", downstream_req_str, get_route.downstream_method, get_route.downstream_path, "HTTP/1.1");
-        }
-        else {
-            downstream_req_str = format!("{}\n{}", downstream_req_str, line);
-        }
-    }
-
-    match TcpStream::connect("127.0.0.1:7979") {
-        Ok(mut client_stream) => {
-            println!("Successfully connected to server in port 7979");
-            client_stream.write(downstream_req_str.as_bytes()).unwrap();
-
-            let mut data = [0 as u8; 4096];
-            match client_stream.read(&mut data) {
-                Ok(_) => {
-
-                    println!("Resp:\n{}", std::str::from_utf8(&data).expect("valid utf8"));
-
-                    stream.write_all(&data).unwrap();
-                    stream.flush().unwrap();
-                },
-                Err(err) => {
-                    println!("Err: {:?}", err);
+                    downstream_req_str = format!("{}\n{} {} {}", 
+                                            downstream_req_str, 
+                                            m.handler().downstream_method, 
+                                            ds_path, 
+                                            "HTTP/1.1");
                 }
+                else {
+                    downstream_req_str = format!("{}\n{}", downstream_req_str, line);
+                }
+            }
+        
+            match TcpStream::connect(m.handler().downstream_uri.to_string()) {
+                Ok(mut client_stream) => {
+                    println!("Successfully connected to server in port 7979");
+                    client_stream.write(downstream_req_str.as_bytes()).unwrap();
+        
+                    let mut data = [0 as u8; 4096];
+                    match client_stream.read(&mut data) {
+                        Ok(_) => {
+        
+                            println!("Resp:\n{}", std::str::from_utf8(&data).expect("valid utf8"));
+        
+                            stream.write_all(&data).unwrap();
+                            stream.flush().unwrap();
+                        },
+                        Err(err) => {
+                            println!("Err: {:?}", err);
+                        }
+                    }
+                },
+                Err(_) => {}
             }
         },
         Err(_) => {}
     }
+
+
+    
 
 }

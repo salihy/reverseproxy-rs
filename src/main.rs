@@ -5,6 +5,13 @@ use std::io::prelude::*;
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::fs;
+use lazy_static::lazy_static;
+
+
+lazy_static! {
+    static ref CFG_STR: String = fs::read_to_string("config.json").expect("Should have been able to read the file");
+    static ref ROUTES_CFG: route::Routes = serde_json::from_str(&CFG_STR).unwrap();
+}
 
 fn main() {
 
@@ -24,10 +31,7 @@ fn main() {
 }
 
 fn get_routes() -> route::Routes {
-    let contents = fs::read_to_string("config.json").expect("Should have been able to read the file");
-    let routes_cfg: route::Routes = serde_json::from_str(&contents).unwrap();
-    println!("Config:\n{:?}", routes_cfg);
-    routes_cfg
+    ROUTES_CFG.clone()
 }
 
 fn handle_connection(mut stream: TcpStream) {
